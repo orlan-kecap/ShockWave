@@ -48,11 +48,11 @@ custom banner by Exotic GANK */
 
 const char linux_banner[] =
     "Linux version 5.4.302-Deandless-Road (" LINUX_COMPILE_BY "@" LINUX_COMPILE_HOST ")\n"
-    "(Android (, +pgo, +bolt, +lto) Clang 19.0.0 (Neutron), LLD 19.0.0)\n"
+    "(Android (pgo, +bolt, +lto) Clang 19.0.0 (Neutron), LLD 19.0.0)\n"
     "Crafted in " BUILD_DATE "\n";
 
 const char linux_proc_banner[] =
     "%s version %s"
     " (" LINUX_COMPILE_BY "@" LINUX_COMPILE_HOST ") "
-    "(Android (EstehX-002, +pgo, +bolt, +lto) Clang 19.0.0 (Neutron), LLD 19.0.0) "
+    "(Android (pgo, +bolt, +lto) Clang 19.0.0 (Neutron), LLD 19.0.0) "
     "Crafted in " BUILD_DATE "\n";
