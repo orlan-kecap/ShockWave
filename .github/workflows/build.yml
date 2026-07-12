@@ -1,0 +1,187 @@
+name: ShockWavel
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'URL repo kernel (kosongkan untuk pakai repo ini sendiri)'
+        required: true
+        default: "https://github.com/orlan-kecap/ShockWave.git"
+        type: string
+      branch:
+        description: "Branch"
+        required: true
+        default: "shock"
+        type: choice
+        options:
+          - shock
+      ksu:
+        description: "KernelSU"
+        required: true
+        default: "none"
+        type: choice
+        options:
+          - none
+          - KernelSU-Next
+
+env:
+  DEVICE: courbet
+  KNAME: ShockWave
+  VAR: KSU
+  ANYKERNEL_REPO: https://github.com/ZGSYet/AnyKernel3
+  ANYKERNEL_BRANCH: master
+  NEUTRON_URL: https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/10032024/neutron-clang-10032024.tar.zst
+  GCC64_REPO: https://github.com/greenforce-project/gcc-arm64
+  GCC32_REPO: https://github.com/greenforce-project/gcc-arm
+
+jobs:
+  build:
+    name: Build Kernel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📦 Install Dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y build-essential libncurses-dev bison flex libssl-dev libelf-dev dwarves bc rsync cpio python3 python3-pip git curl wget make lz4 zip unzip ccache zstd
+          sudo apt install -y fakeroot device-tree-compiler libdw-dev pkg-config lld llvm
+
+      - name: 📥 Clone Kernel Source
+        run: |
+          git clone --depth=1 -b ${{ github.event.inputs.branch }} ${{ github.event.inputs.repo }} kernel
+
+      - name: 🧩 Setup KernelSU
+        if: ${{ github.event.inputs.ksu == 'KernelSU-Next' }}
+        working-directory: kernel
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU-Next/stable/kernel/setup.sh" | bash -s syscall
+
+      - name: 🛠️ Setup Toolchain (Clang + GCC)
+        run: |
+          mkdir -p toolchain
+          cd toolchain
+
+          echo "Downloading Neutron Clang..."
+          mkdir -p clang-neutron
+          cd clang-neutron
+          wget -q "${{ env.NEUTRON_URL }}" -O neutron-clang.tar.zst
+          tar --zstd -xf neutron-clang.tar.zst
+          rm -f neutron-clang.tar.zst
+          cd ..
+
+          echo "Cloning GCC64 greenforce..."
+          git clone -q "${{ env.GCC64_REPO }}" -b main --depth=1 gcc64-greenforce
+
+          echo "Cloning GCC32 greenforce..."
+          git clone -q "${{ env.GCC32_REPO }}" -b main --depth=1 gcc32-greenforce
+
+      - name: 🔍 Detect Cross-Compile Prefix
+        id: prefix
+        run: |
+          GCC64_DIR="$(pwd)/toolchain/gcc64-greenforce/bin"
+          GCC32_DIR="$(pwd)/toolchain/gcc32-greenforce/bin"
+
+          CROSS_COMPILE_PREFIX=$(find "$GCC64_DIR" -maxdepth 1 -name "*-gcc" | head -n1 | xargs -n1 basename | sed 's/gcc$//')
+          CROSS_COMPILE_ARM32_PREFIX=$(find "$GCC32_DIR" -maxdepth 1 -name "*-gcc" | head -n1 | xargs -n1 basename | sed 's/gcc$//')
+
+          if [ -z "$CROSS_COMPILE_PREFIX" ] || [ -z "$CROSS_COMPILE_ARM32_PREFIX" ]; then
+            echo "❌ Gagal deteksi prefix GCC"
+            exit 1
+          fi
+
+          echo "cross_compile=$CROSS_COMPILE_PREFIX" >> "$GITHUB_OUTPUT"
+          echo "cross_compile_arm32=$CROSS_COMPILE_ARM32_PREFIX" >> "$GITHUB_OUTPUT"
+
+      - name: 🔨 Build Kernel
+        working-directory: kernel
+        env:
+          CLANG_DIR: ${{ github.workspace }}/toolchain/clang-neutron/bin
+          GCC64_DIR: ${{ github.workspace }}/toolchain/gcc64-greenforce/bin
+          GCC32_DIR: ${{ github.workspace }}/toolchain/gcc32-greenforce/bin
+          CROSS_COMPILE_PREFIX: ${{ steps.prefix.outputs.cross_compile }}
+          CROSS_COMPILE_ARM32_PREFIX: ${{ steps.prefix.outputs.cross_compile_arm32 }}
+        run: |
+          export ARCH=arm64
+          export KBUILD_BUILD_USER=PryL
+          export KBUILD_BUILD_HOST=github-actions
+          export PATH="$CLANG_DIR:$GCC64_DIR:$GCC32_DIR:$PATH"
+
+          make O=out ARCH=arm64 "${DEVICE}_defconfig"
+
+          make -j$(nproc --all) \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE="$CROSS_COMPILE_PREFIX" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32_PREFIX" \
+            2>&1 | tee build.log
+
+      - name: 📦 Repack AnyKernel3
+        working-directory: kernel
+        run: |
+          KERNEL="out/arch/arm64/boot/Image.gz"
+          DTBO="out/arch/arm64/boot/dtbo.img"
+          DTB="out/arch/arm64/boot/dtb.img"
+          ZIPNAME="${{ env.KNAME }}-${{ env.VAR }}.zip"
+
+          if [ ! -f "$KERNEL" ]; then
+            echo "❌ Build gagal, Image.gz tidak ditemukan!"
+            exit 1
+          fi
+
+          git clone -q "${{ env.ANYKERNEL_REPO }}" -b "${{ env.ANYKERNEL_BRANCH }}" AnyKernel3
+
+          sed -i "s/device\.name1=.*/device.name1=${{ env.DEVICE }}/"   AnyKernel3/anykernel.sh
+          sed -i "s/device\.name2=.*/device.name2=${{ env.DEVICE }}in/" AnyKernel3/anykernel.sh
+          sed -i "s/kernel\.string=.*/kernel.string=${{ env.KNAME }}/"  AnyKernel3/anykernel.sh
+
+          cp "$KERNEL" AnyKernel3/
+          [ -f "$DTBO" ] && cp "$DTBO" AnyKernel3/
+          [ -f "$DTB"  ] && cp "$DTB"  AnyKernel3/
+
+          cd AnyKernel3
+          zip -r9 "../$ZIPNAME" * -x "*.git*" -x "*.github*"
+          cd ..
+          rm -rf AnyKernel3
+
+      - name: 📤 Upload ke Telegram
+        if: success()
+        working-directory: kernel
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+          CHAT: ${{ secrets.CHAT }}
+        run: |
+          ZIPNAME="${{ env.KNAME }}-${{ env.VAR }}.zip"
+          curl -F "chat_id=${CHAT}" \
+               -F "document=@${ZIPNAME}" \
+               "https://api.telegram.org/bot${TOKEN}/sendDocument"
+
+      - name: 📮 Kirim Log kalau Gagal
+        if: failure()
+        working-directory: kernel
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+          CHAT: ${{ secrets.CHAT }}
+        run: |
+          if [ -f build.log ]; then
+            curl -F "chat_id=${CHAT}" \
+                 -F "document=@build.log" \
+                 "https://api.telegram.org/bot${TOKEN}/sendDocument"
+          fi
+
+      - name: 📎 Simpan Log sebagai Artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: kernel/build.log
+          if-no-files-found: ignore
