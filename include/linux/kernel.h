@@ -37,6 +37,7 @@
 #define S16_MAX		((s16)(U16_MAX>>1))
 #define S16_MIN		((s16)(-S16_MAX - 1))
 #define U32_MAX		((u32)~0U)
+#define U32_MIN		((u32)0)
 #define S32_MAX		((s32)(U32_MAX>>1))
 #define S32_MIN		((s32)(-S32_MAX - 1))
 #define U64_MAX		((u64)~0ULL)
@@ -485,7 +486,6 @@ extern bool parse_option_str(const char *str, const char *option);
 extern char *next_arg(char *args, char **param, char **val);
 
 extern int core_kernel_text(unsigned long addr);
-extern int init_kernel_text(unsigned long addr);
 extern int core_kernel_data(unsigned long addr);
 extern int __kernel_text_address(unsigned long addr);
 extern int kernel_text_address(unsigned long addr);
