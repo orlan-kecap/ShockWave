@@ -12,9 +12,8 @@ on:
         description: "Branch"
         required: true
         default: "shock"
-        type: choice
-        options:
-          - shock
+        type: string
+        
       ksu:
         description: "KernelSU"
         required: true
