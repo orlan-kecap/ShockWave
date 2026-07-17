@@ -105,7 +105,7 @@ jobs:
           export KBUILD_BUILD_HOST=github-actions
           export PATH="$CLANG_DIR:$GCC64_DIR:$GCC32_DIR:$PATH"
 
-          make O=out ARCH=arm64 "${DEVICE}_defconfig"
+          make O=out ARCH=arm64 "vendor/${DEVICE}_defconfig"
 
           make -j$(nproc --all) \
             O=out \
